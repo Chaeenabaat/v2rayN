@@ -1,0 +1,91 @@
+name: NEW Build v2rayN Linux x64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Linux x64
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Remove preinstalled .NET SDKs
+        shell: pwsh
+        run: |
+          dotnet --list-sdks
+
+          dotnet --list-sdks | % {
+            $_ -match '^\S+\s+\[(.+)\]$' > $null
+            $d = Join-Path $Matches[1] $_.Split()[0]
+            Write-Host "Removing $d"
+            sudo rm -rf "$d"
+          }
+
+          dotnet --list-sdks 2>$null
+          $LASTEXITCODE = 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.1xx'
+
+      - name: Build v2rayN
+        shell: bash
+        working-directory: ./v2rayN
+        run: |
+          dotnet publish \
+            ./v2rayN.Desktop/v2rayN.Desktop.csproj \
+            -c Release \
+            -r linux-x64 \
+            -p:SelfContained=true \
+            -o "$GITHUB_WORKSPACE/v2rayN-linux-64"
+
+      - name: Remove debug symbols
+        shell: bash
+        run: |
+          find v2rayN-linux-64 -type f -name '*.pdb' -delete
+
+      - name: Download official v2rayN core bundle
+        shell: bash
+        run: |
+          wget -nv \
+            -O v2rayN-core.zip \
+            "https://github.com/2dust/v2rayN-core-bin/raw/refs/heads/master/v2rayN-linux-64.zip"
+
+      - name: Extract core bundle
+        shell: bash
+        run: |
+          mkdir -p core
+          unzip -q v2rayN-core.zip -d core
+
+          echo "=== Core bundle ==="
+          find core -maxdepth 3 -type f -print
+
+      - name: Add core files to application
+        shell: bash
+        run: |
+          cp -a core/. v2rayN-linux-64/
+
+      - name: Create portable ZIP
+        shell: bash
+        run: |
+          7z a -tZip \
+            v2rayN-linux-64.zip \
+            v2rayN-linux-64 \
+            -mx1
+
+      - name: Upload Linux x64 artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: v2rayN-linux-64
+          path: v2rayN-linux-64.zip
+          if-no-files-found: error
